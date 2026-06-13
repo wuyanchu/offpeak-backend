@@ -9,13 +9,33 @@ require('dotenv').config();
 
 const app = express();
 
-// 允許跨域 (CORS)，這裡先寫死您的前端 TOS 網址和本地測試網址
+// ⚠️ 關鍵配置 1：允許跨域 (請確保這裡包含了您的真實前端網址)
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://offpeak-frontend.tos-cn-hongkong.bytepluses.com',
+  'http://offpeak.duckdns.org' // 如果您使用了 DuckDNS，請保留或修改為您的真實域名
+];
+
 app.use(cors({ 
-    origin: ['http://localhost:5173', 'https://offpeak-frontend.tos-cn-hongkong.bytepluses.com'], 
+    origin: function(origin, callback) {
+      // 允許沒有 origin 的請求 (例如 Postman 或某些伺服器間請求)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true 
 }));
 app.use(express.json());
 app.use(passport.initialize());
+
+// ⚠️ 關鍵配置 2：定義您的前端和後端網址 (請務必修改為您真實的網址！)
+// 如果您用的是 DuckDNS，請把 FRONTEND_URL 改為 'http://offpeak.duckdns.org'
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://offpeak-frontend.tos-cn-hongkong.bytepluses.com';
+// 後端網址用於 Google OAuth 回調 (必須與 Google Console 中填寫的完全一致，包含 http/https 和 :5000)
+const BACKEND_URL = process.env.BACKEND_URL || 'http://101.47.31.160:5000'; 
 
 // ⚠️ 模擬數據庫 (實際項目請替換為 MongoDB/PostgreSQL)
 const users = []; 
@@ -55,7 +75,8 @@ passport.use(new LocalStrategy(
 passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: "/api/auth/google/callback"
+    // ⚠️ 關鍵配置 3：回調網址必須與 Google Cloud Console 中填寫的「一字不差」
+    callbackURL: `${BACKEND_URL}/api/auth/google/callback`
 }, (accessToken, refreshToken, profile, done) => {
     try {
         let user = users.find(u => u.googleId === profile.id);
@@ -106,12 +127,13 @@ app.post('/api/auth/login', (req, res, next) => {
 app.get('/api/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 
 // [Google] Google 回調處理
+// ⚠️ 關鍵配置 4：修復重定向，確保帶有 /?token= 並且指向正確的前端首頁
 app.get('/api/auth/google/callback', 
-    passport.authenticate('google', { session: false, failureRedirect: 'https://offpeak-frontend.tos-cn-hongkong.bytepluses.com/login' }),
+    passport.authenticate('google', { session: false, failureRedirect: `${FRONTEND_URL}/` }),
     (req, res) => {
         const token = generateToken(req.user);
-        // 實際項目中，這裡會重定向回您的前端網址並帶上 token
-        res.redirect(`https://offpeak-frontend.tos-cn-hongkong.bytepluses.com/auth/callback?token=${token}`);
+        // 這裡是解決「顯示文件列表」問題的終極修復！
+        res.redirect(`${FRONTEND_URL}/?token=${token}`);
     }
 );
 
